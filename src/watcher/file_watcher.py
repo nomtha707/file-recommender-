@@ -187,54 +187,63 @@ class FileChangeHandler(FileSystemEventHandler):
 # --- Main Watcher Loop (intended to be run in a separate thread/process) ---
 
 
-def run_watcher_service(db: MetadataDB, index: VectorStoreIndex):
-    """Starts the file watcher service."""
-    path_to_watch = str(config.WATCH_PATH)  # Ensure it's a string
-    event_handler = FileChangeHandler(db, index)
-
+def perform_initial_scan(db: MetadataDB, index: VectorStoreIndex, event_handler: FileChangeHandler):
+    """Performs the initial scan, processing new/modified files."""
+    path_to_watch = str(config.WATCH_PATH)
     print(
         f"Watcher: Performing initial scan of {path_to_watch} (processing new/modified files)...")
     processed_count = 0
     skipped_count = 0
+    start_time = time.time()  # Start timing
+
     if os.path.exists(path_to_watch):
         for root, dirs, files in os.walk(path_to_watch, topdown=True):
             dirs[:] = [
                 d for d in dirs if d not in config.EXCLUDED_DIRS and not d.startswith('.')]
             files = [f for f in files if not f.startswith('.')]
 
-            # Check root exclusion more carefully
             try:
                 is_excluded_root = any(part in config.EXCLUDED_DIRS or part.startswith(
                     '.') for part in Path(root).parts)
             except Exception:
-                is_excluded_root = True  # Exclude if path is invalid
+                is_excluded_root = True
 
             if is_excluded_root:
                 continue
 
             for filename in files:
+                # Add a KeyboardInterrupt check inside the loop
                 try:
+                    # Check for interruption periodically
+                    if time.time() % 10 == 0:  # Check every ~10 seconds
+                        pass  # Simple check to allow interrupt handling
+
                     file_path = os.path.join(root, filename)
-                    # Pass check_modified_time=True for the scan
                     was_processed = event_handler.process_file(
                         file_path, check_modified_time=True)
-                    if was_processed is True:  # Explicit check for True
+                    if was_processed is True:
                         processed_count += 1
-                    # Explicit check for False (Skipped or Error)
                     elif was_processed is False:
                         skipped_count += 1
-                    # None return might indicate path issue before processing attempt
+                except KeyboardInterrupt:
+                    print("\nWatcher: Initial scan interrupted by user.")
+                    raise  # Re-raise the exception to stop the scan
                 except Exception as e:
                     print(
                         f"Watcher Error during initial scan for {filename}: {e}")
                     skipped_count += 1
-        print(
-            f"Watcher: Initial scan complete. Processed: {processed_count}, Skipped/Unchanged: {skipped_count}")
-    else:
-        print(
-            f"Watcher Error: Watch path '{path_to_watch}' does not exist. Please check config.py.")
-        return  # Stop if path is invalid
 
+        end_time = time.time()  # End timing
+        print(
+            f"Watcher: Initial scan complete. Processed: {processed_count}, Skipped/Unchanged: {skipped_count}. Duration: {end_time - start_time:.2f} seconds.")
+    else:
+        print(f"Watcher Error: Watch path '{path_to_watch}' does not exist.")
+        raise FileNotFoundError(f"Watch path does not exist: {path_to_watch}")
+    
+
+def run_observer_loop(db: MetadataDB, index: VectorStoreIndex, event_handler: FileChangeHandler):
+    """Starts the file watcher observer loop (no initial scan)."""
+    path_to_watch = str(config.WATCH_PATH)
     observer = Observer()
     observer.schedule(event_handler, path_to_watch, recursive=True)
     observer.start()
@@ -242,12 +251,75 @@ def run_watcher_service(db: MetadataDB, index: VectorStoreIndex):
 
     try:
         while True:
-            time.sleep(5)  # Reduce CPU usage slightly by sleeping longer
+            time.sleep(5)
     except KeyboardInterrupt:
         print("\nWatcher: Stopping observer...")
         observer.stop()
-    observer.join()
+        # No need to join here, main thread handles shutdown
+    # observer.join() # Join is usually blocking, handle in main thread if needed
     print("Watcher: Observer stopped.")
+
+# def run_watcher_service(db: MetadataDB, index: VectorStoreIndex):
+#     """Starts the file watcher service."""
+#     path_to_watch = str(config.WATCH_PATH)  # Ensure it's a string
+#     event_handler = FileChangeHandler(db, index)
+
+#     print(
+#         f"Watcher: Performing initial scan of {path_to_watch} (processing new/modified files)...")
+#     processed_count = 0
+#     skipped_count = 0
+#     if os.path.exists(path_to_watch):
+#         for root, dirs, files in os.walk(path_to_watch, topdown=True):
+#             dirs[:] = [
+#                 d for d in dirs if d not in config.EXCLUDED_DIRS and not d.startswith('.')]
+#             files = [f for f in files if not f.startswith('.')]
+
+#             # Check root exclusion more carefully
+#             try:
+#                 is_excluded_root = any(part in config.EXCLUDED_DIRS or part.startswith(
+#                     '.') for part in Path(root).parts)
+#             except Exception:
+#                 is_excluded_root = True  # Exclude if path is invalid
+
+#             if is_excluded_root:
+#                 continue
+
+#             for filename in files:
+#                 try:
+#                     file_path = os.path.join(root, filename)
+#                     # Pass check_modified_time=True for the scan
+#                     was_processed = event_handler.process_file(
+#                         file_path, check_modified_time=True)
+#                     if was_processed is True:  # Explicit check for True
+#                         processed_count += 1
+#                     # Explicit check for False (Skipped or Error)
+#                     elif was_processed is False:
+#                         skipped_count += 1
+#                     # None return might indicate path issue before processing attempt
+#                 except Exception as e:
+#                     print(
+#                         f"Watcher Error during initial scan for {filename}: {e}")
+#                     skipped_count += 1
+#         print(
+#             f"Watcher: Initial scan complete. Processed: {processed_count}, Skipped/Unchanged: {skipped_count}")
+#     else:
+#         print(
+#             f"Watcher Error: Watch path '{path_to_watch}' does not exist. Please check config.py.")
+#         return  # Stop if path is invalid
+
+#     observer = Observer()
+#     observer.schedule(event_handler, path_to_watch, recursive=True)
+#     observer.start()
+#     print(f'Watcher: Started watching {path_to_watch} for changes...')
+
+#     try:
+#         while True:
+#             time.sleep(5)  # Reduce CPU usage slightly by sleeping longer
+#     except KeyboardInterrupt:
+#         print("\nWatcher: Stopping observer...")
+#         observer.stop()
+#     observer.join()
+#     print("Watcher: Observer stopped.")
 
 # Example of how this might be run (e.g., in main.py)
 # if __name__ == '__main__':

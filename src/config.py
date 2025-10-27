@@ -27,7 +27,7 @@ EMBED_MODEL_NAME = "BAAI/bge-small-en-v1.5"
 EMBED_DEVICE = "cpu" # Force embedding to CPU to save GPU VRAM
 
 # --- LLM Model ---
-LLM_MODEL_NAME = "gemma:2b-cpu" # Use the CPU version
+LLM_MODEL_NAME = "gemma3:270m" # Use the CPU version
 LLM_REQUEST_TIMEOUT = 600.0 # 10 minutes
 
 # --- Retrieval Settings ---
