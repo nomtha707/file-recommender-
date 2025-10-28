@@ -23,7 +23,7 @@ CHROMA_DB_PATH = str(DB_FOLDER / "chroma_db") # Chroma needs a string path
 
 # --- Embedding Model ---
 # Using the same model as Project 1 for consistency
-EMBED_MODEL_NAME = "BAAI/bge-small-en-v1.5"
+EMBED_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 EMBED_DEVICE = "cpu" # Force embedding to CPU to save GPU VRAM
 
 # --- LLM Model ---

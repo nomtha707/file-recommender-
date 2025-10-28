@@ -136,47 +136,32 @@ class CustomHybridRetriever(BaseRetriever):
             print(f"  Node {i} NodeID: {node.node_id}")
         # --- END DEBUG ---
 
-        print("🔍 Stage 2: Fetching metadata from SQLite & filtering inactive/old files.")
+        print("🔍 Stage 2: Fetching metadata from SQLite & filtering inactive/old files (SYNCHRONOUS TEST).")
         seven_days_ago_iso = (datetime.now() - timedelta(days=7)).isoformat()
-
-        # Create tasks to fetch metadata ONLY for nodes with paths
-        path_to_node_map = {}
-        tasks = []
-        valid_initial_nodes = [] # Keep track of nodes we're fetching meta for
-        for node in initial_nodes:
-            path = node.metadata.get('path')
-            if path:
-                tasks.append(asyncio.to_thread(self._metadata_db.get, path))
-                path_to_node_map[path] = node # Map path back to the original node object
-                valid_initial_nodes.append(node) # Add node to the list we'll iterate later
-            else:
-                 print(f"  Warning: Node {node.node_id} missing 'path' in metadata during task creation.")
-
-        # --- Check if there are any tasks to run ---
-        if not tasks:
-            print("   └── No valid paths found in initial candidates to fetch metadata for. Returning empty.")
-            return [] # Return empty list immediately
-
-        # --- Fetch metadata ---
-        # metadata_results_list will contain results for nodes in valid_initial_nodes
-        metadata_results_list = await asyncio.gather(*tasks)
-
-        # Create a dictionary for quick lookup: path -> sqlite_metadata
-        # Ensure meta is not None before accessing 'path'
-        metadata_map = {meta['path']: meta for meta in metadata_results_list if meta and 'path' in meta}
 
         valid_node_count = 0
         filtered_nodes_with_bh_data = []
 
-        # --- Loop through VALID nodes for which we fetched metadata ---
-        for node in valid_initial_nodes: # Iterate only the nodes we intended to check
+        # --- SYNCHRONOUS LOOP ---
+        for node in initial_nodes:  # Iterate through all initial nodes
             original_metadata = node.metadata
-            original_path = original_metadata.get('path') # Path definitely exists here
+            original_path = original_metadata.get('path')
 
-            # Get the corresponding metadata fetched from SQLite using the map
-            meta_from_db = metadata_map.get(original_path)
+            if not original_path:
+                print(
+                    f"  Warning: Node {node.node_id} missing 'path' in metadata. Skipping.")
+                continue
 
-            # --- DEBUG PRINT: What did SQLite return for this path? ---
+            # --- Call DB Directly (Blocking) ---
+            try:
+                meta_from_db = self._metadata_db.get(original_path)
+            except Exception as db_err:
+                print(
+                    f"  ERROR fetching metadata for {original_path} from DB: {db_err}")
+                continue  # Skip node if DB query fails
+            # --- ---
+
+            # --- DEBUG PRINT ---
             # print(f"  Processing Node {node.node_id} (Path: {original_path}) - SQLite Meta: {meta_from_db}")
             # --- END DEBUG ---
 
@@ -195,7 +180,7 @@ class CustomHybridRetriever(BaseRetriever):
                 "access_count": meta_from_db.get("access_count", 0),
                 "accessed_at": meta_from_db.get("accessed_at", ""),
                 "modified_at": modified_at_str,
-                "path_from_extra_info": original_path # Store path in extra_info too
+                "path_from_extra_info": original_path
             }
 
             # 4. Assign ONLY to extra_info
@@ -203,22 +188,21 @@ class CustomHybridRetriever(BaseRetriever):
 
             # 5. BRUTE FORCE FIX: Restore path if it got lost
             if 'path' not in node.metadata or node.metadata.get('path') != original_path:
-                 print(f"  WARNING: Path lost for Node {node.node_id}. Restoring...")
-                 node.metadata['path'] = original_path
+                print(
+                    f"  WARNING: Path lost for Node {node.node_id}. Restoring...")
+                node.metadata['path'] = original_path
 
             # 6. Add the node back
             filtered_nodes_with_bh_data.append(node)
             valid_node_count += 1
-        # --- END LOOP ---
+        # --- END SYNCHRONOUS LOOP ---
 
-        print(f"   └── {valid_node_count} candidates remain after filtering & metadata fetch.")
+        print(
+            f"   └── {valid_node_count} candidates remain after filtering & metadata fetch.")
 
         # --- DEBUG PRINT 2 ---
         print("\nDEBUG (Filtered): Metadata & ExtraInfo of first 5 remaining candidates:")
-        for i, filtered_node in enumerate(filtered_nodes_with_bh_data[:5]):
-             print(f"  Node {i} Metadata: {filtered_node.metadata}")
-             print(f"  Node {i} NodeID: {filtered_node.node_id}")
-             print(f"  Node {i} Extra Info: {getattr(filtered_node.node, 'extra_info', 'N/A')}")
+        # ... (rest of debug print remains same) ...
         # --- END DEBUG ---
 
         return filtered_nodes_with_bh_data
