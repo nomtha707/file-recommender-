@@ -18,7 +18,22 @@ from llama_index.llms.ollama import Ollama
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.vector_stores.chroma import ChromaVectorStore
 from llama_index.core.query_engine import RetrieverQueryEngine
+from llama_index.core import PromptTemplate
 from src.retrieval_service import CustomHybridRetriever, BehavioralReRanker
+
+QA_TEMPLATE_STR = (
+    "Context information is provided below.\n"
+    "---------------------\n"
+    "{context_str}\n"
+    "---------------------\n"
+    "You are a helpful assistant. Based *only* on the context information provided above, "
+    "answer the query.\n"
+    "If the context does not contain the answer, simply state 'The context does not provide "
+    "information to answer this query.' Do not add any other information.\n"
+    "Query: {query_str}\n"
+    "Answer: "
+)
+qa_template = PromptTemplate(QA_TEMPLATE_STR)
 
 
 async def user_chat_loop(query_engine: RetrieverQueryEngine):
@@ -53,24 +68,25 @@ async def user_chat_loop(query_engine: RetrieverQueryEngine):
             response = await asyncio.to_thread(query_engine.query, user_query)
 
             # --- Print Retrieved Files ---
-            print("\n💡 Top Retrieved Files (No LLM Synthesis):")
-            if response.source_nodes:
-                # Display top K nodes (using config.DISPLAY_TOP_K)
-                for node in response.source_nodes[:config.DISPLAY_TOP_K]:
-                    # --- Make path printing more robust ---
-                    file_path = node.metadata.get('path', 'N/A')
-                    # Ensure node score exists and is float before formatting
-                    score = node.score if node.score is not None else 0.0
-                    print(f"- {file_path} (Score: {score:.4f})")
-                    # --- Uncomment to see more metadata for debugging ---
-                    # print(f"  Accessed: {node.node.extra_info.get('accessed_at', 'N/A')}")
-                    # print(f"  Modified: {node.node.extra_info.get('modified_at', 'N/A')}")
-                    # print(f"  Time Spent: {node.node.extra_info.get('total_time_spent_hrs', 'N/A')}")
-                    # print(f"  Access Count: {node.node.extra_info.get('access_count', 'N/A')}")
-                    # --- ---
-            else:
-                print("No relevant documents found.")
-            # --- REMOVED the print(response.response) lines ---
+            print("\n💡 Top Retrieved Files :")
+            print(response.response)
+            # if response.source_nodes:
+            #     # Display top K nodes (using config.DISPLAY_TOP_K)
+            #     for node in response.source_nodes[:config.DISPLAY_TOP_K]:
+            #         # --- Make path printing more robust ---
+            #         file_path = node.metadata.get('path', 'N/A')
+            #         # Ensure node score exists and is float before formatting
+            #         score = node.score if node.score is not None else 0.0
+            #         print(f"- {file_path} (Score: {score:.4f})")
+            #         # --- Uncomment to see more metadata for debugging ---
+            #         # print(f"  Accessed: {node.node.extra_info.get('accessed_at', 'N/A')}")
+            #         # print(f"  Modified: {node.node.extra_info.get('modified_at', 'N/A')}")
+            #         # print(f"  Time Spent: {node.node.extra_info.get('total_time_spent_hrs', 'N/A')}")
+            #         # print(f"  Access Count: {node.node.extra_info.get('access_count', 'N/A')}")
+            #         # --- ---
+            # else:
+            #     print("No relevant documents found.")
+            # # --- REMOVED the print(response.response) lines ---
 
         except Exception as e:
             print(f"\nAn error occurred: {e}")
@@ -135,7 +151,7 @@ async def main():
     print("File watcher service started in background thread.")
 
     # 5. Initialize Retrieval Components
-    custom_retriever = CustomHybridRetriever(index=index, metadata_db=db_instance, top_k=config.SEMANTIC_TOP_K)
+    custom_retriever = CustomHybridRetriever(index=index, metadata_db=db_instance, top_k=3)
     reranker = BehavioralReRanker()
     print("Custom retriever and re-ranker initialized.")
 
@@ -144,7 +160,8 @@ async def main():
         retriever=custom_retriever,
         node_postprocessors=[reranker],
         llm=Settings.llm,
-        response_mode="no_text"
+        text_qa_template=qa_template
+        # response_mode="no_text"
     )
     print("Retriever Query Engine initialized.")
     print("--- ✅ System is ready ---")

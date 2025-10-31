@@ -112,7 +112,6 @@ class FileChangeHandler(FileSystemEventHandler):
             print(f"Watcher: Processing {path_str}")
             # print(f"  Extracting text...") # Verbose logging
             text = extract_text(path_str)
-            # print(f"  Text extracted (length: {len(text)}).") # Verbose logging
 
             # Create a LlamaIndex Document
             # We use the path as doc_id for easy updates/deletions
